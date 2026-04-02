@@ -5,10 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 Future<void> main() async {
-  // تأمين تهيئة التطبيق
   WidgetsFlutterBinding.ensureInitialized();
   
-  // الحصول على الكاميرات المتاحة
   final cameras = await availableCameras();
   final firstCamera = cameras.first;
 
@@ -44,7 +42,6 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
   @override
   void initState() {
     super.initState();
-    // استخدام دقة عالية لضمان قراءة الأرقام الصغيرة
     _controller = CameraController(widget.camera, ResolutionPreset.high);
     _initializeControllerFuture = _controller.initialize();
   }
@@ -56,27 +53,21 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
     super.dispose();
   }
 
-  // التحكم بالفلاش
   Future<void> _toggleFlash() async {
     if (!_controller.value.isInitialized) return;
     try {
-      if (_isFlashOn) {
-        await _controller.setFlashMode(FlashMode.off);
-      } else {
-        await _controller.setFlashMode(FlashMode.torch);
-      }
+      _isFlashOn ? await _controller.setFlashMode(FlashMode.off) : await _controller.setFlashMode(FlashMode.torch);
       setState(() => _isFlashOn = !_isFlashOn);
     } catch (e) {
       debugPrint("Flash Error: $e");
     }
   }
 
-  // عملية التصوير واستخراج النص الحقيقي
   Future<void> _takePicture() async {
     if (_isScanning) return;
     setState(() {
       _isScanning = true;
-      _scanStatus = "جاري استخراج البيانات...";
+      _scanStatus = "جاري قراءة بيانات الكرت...";
     });
 
     try {
@@ -86,67 +77,83 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
       final inputImage = InputImage.fromFilePath(image.path);
       final RecognizedText recognizedText = await _textRecognizer.processImage(inputImage);
       
-      // معالجة النص المستخرج وتنظيفه
       List<String> lines = recognizedText.text.split('\n')
           .map((s) => s.trim())
           .where((s) => s.isNotEmpty)
           .toList();
 
       if (lines.isNotEmpty) {
-        _user = lines[0]; // السطر الأول يوزر
-        // إذا كان هناك سطر ثاني نأخذه كباسورد، وإلا فالباسورد هو نفسه اليوزر
+        _user = lines[0]; 
         _pass = lines.length > 1 ? lines[1] : lines[0]; 
 
         setState(() {
-          _scanStatus = "تم استخراج البيانات بنجاح ✅\nUser: $_user\nPass: $_pass";
+          _scanStatus = "تم استخراج البيانات ✅\nUser: $_user\nPass: $_pass";
           _isLoginEnabled = true;
           _isScanning = false;
         });
       } else {
         setState(() {
-          _scanStatus = "فشلت القراءة، حاول تقريب الكاميرا أكثر";
+          _scanStatus = "فشلت القراءة، حاول مرة أخرى";
           _isScanning = false;
         });
       }
     } catch (e) {
       setState(() {
-        _scanStatus = "خطأ في معالجة الصورة";
+        _scanStatus = "خطأ في معالجة الكرت";
         _isScanning = false;
       });
     }
   }
 
-  // عملية تسجيل الدخول الذكية
+  // المحرك المطور لتسجيل الدخول في الخلفية (POST Method)
   Future<void> _smartLogin() async {
     setState(() {
-      _scanStatus = "جاري الاتصال بالشبكة...";
+      _scanStatus = "جاري فتح الثغرة وتسجيل الدخول...";
       _isLoginEnabled = false;
     });
 
     try {
-      // محاولة اكتشاف صفحة الميكروتيك تلقائياً
-      var request = http.Request('GET', Uri.parse("http://connectivitycheck.gstatic.com/generate_204"));
-      request.followRedirects = false;
-      var response = await request.send().timeout(const Duration(seconds: 5));
+      // 1. اكتشاف رابط صفحة الميكروتيك الحالية
+      var checkReq = http.Request('GET', Uri.parse("http://connectivitycheck.gstatic.com/generate_204"));
+      checkReq.followRedirects = false;
+      var checkRes = await checkReq.send().timeout(const Duration(seconds: 5));
       
-      String baseUrl = response.headers['location'] ?? "http://10.0.0.1/login";
+      String loginUrl = checkRes.headers['location'] ?? "http://10.0.0.1/login";
       
-      // إرسال طلب الدخول باليوزر والباسورد المستخرجين
-      Uri loginUri = Uri.parse(baseUrl).replace(queryParameters: {
-        'username': _user,
-        'password': _pass,
-      });
+      // تنظيف الرابط وتوجيهه لصفحة الـ Login مباشرة
+      if (!loginUrl.contains("login")) {
+         loginUrl = loginUrl.split('?')[0];
+         if(!loginUrl.endsWith('/')) loginUrl += '/';
+         loginUrl += "login"; 
+      }
 
-      var loginResponse = await http.get(loginUri).timeout(const Duration(seconds: 10));
+      // 2. إرسال البيانات عبر طلب POST (محاكاة المتصفح)
+      var response = await http.post(
+        Uri.parse(loginUrl),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: {
+          'username': _user,
+          'password': _pass,
+          'dst': 'http://www.google.com',
+          'popup': 'true',
+        },
+      ).timeout(const Duration(seconds: 12));
 
-      if (loginResponse.statusCode == 200) {
-        setState(() => _scanStatus = "تم تسجيل الدخول بنجاح! استمتع 🚀");
+      // 3. تحليل النتيجة
+      if (response.statusCode == 200 || response.statusCode == 302) {
+        setState(() {
+          _scanStatus = "تم تسجيل الدخول بنجاح! 🚀\nالإنترنت يعمل الآن في الخلفية";
+        });
       } else {
-        setState(() => _scanStatus = "تم إرسال الطلب، تحقق من اتصالك.");
+        setState(() {
+          _scanStatus = "تم إرسال الطلب، تحقق من الإنترنت";
+        });
       }
     } catch (e) {
       setState(() {
-        _scanStatus = "تأكد من اتصالك بشبكة الواي فاي";
+        _scanStatus = "خطأ في الاتصال، تأكد من الواي فاي";
         _isLoginEnabled = true;
       });
     }
@@ -160,7 +167,7 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
       body: SafeArea(
         child: Column(
           children: [
-            // قسم الكاميرا (نصف الشاشة العلوي تقريباً)
+            // الكاميرا وإطار التحديد
             SizedBox(
               height: size.height * 0.45,
               child: Stack(
@@ -174,7 +181,6 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
                       return const Center(child: CircularProgressIndicator(color: Colors.cyan));
                     },
                   ),
-                  // إطار تحديد البطاقة
                   Center(
                     child: Container(
                       width: size.width * 0.8,
@@ -189,18 +195,16 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
               ),
             ),
 
-            // قسم التحكم والبيانات
+            // واجهة التحكم
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                padding: const EdgeInsets.all(24),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // حالة القراءة
                     Text(_scanStatus, textAlign: TextAlign.center,
                         style: const TextStyle(fontSize: 18, color: Colors.cyan, fontWeight: FontWeight.bold)),
                     
-                    // الأزرار
                     Column(
                       children: [
                         Row(
@@ -219,10 +223,10 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
                                 child: const Icon(Icons.camera_alt, color: Colors.black, size: 40),
                               ),
                             ),
-                            const SizedBox(width: 48), // للتوازن البصري
+                            const SizedBox(width: 48),
                           ],
                         ),
-                        const SizedBox(height: 30),
+                        const SizedBox(height: 35),
                         SizedBox(
                           width: double.infinity, 
                           height: 55,
@@ -239,7 +243,7 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
                       ],
                     ),
                     
-                    // التوقيع الشخصي باللون الأحمر العريض
+                    // التوقيع الأحمر العريض
                     const Text(
                       "Powered by : Sohail Shehada",
                       style: TextStyle(
