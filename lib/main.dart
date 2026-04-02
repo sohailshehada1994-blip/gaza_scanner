@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,33 +29,32 @@ class GazaWifiScanner extends StatefulWidget {
 class _GazaWifiScannerState extends State<GazaWifiScanner> {
   late CameraController _controller;
   late Future<void> _initializeControllerFuture;
+  final TextRecognizer _textRecognizer = TextRecognizer();
   
   bool _isFlashOn = false;
   bool _isScanning = false;
-  String _scanStatus = "ضع البطاقة داخل الإطار";
-  String? _extractedCode;
+  String _scanStatus = "ضع الكرت داخل الإطار";
+  String _user = "";
+  String _pass = "";
   bool _isLoginEnabled = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = CameraController(widget.camera, ResolutionPreset.medium);
+    _controller = CameraController(widget.camera, ResolutionPreset.high); // دقة عالية للقراءة
     _initializeControllerFuture = _controller.initialize();
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _textRecognizer.close();
     super.dispose();
   }
 
   Future<void> _toggleFlash() async {
     if (!_controller.value.isInitialized) return;
-    if (_isFlashOn) {
-      await _controller.setFlashMode(FlashMode.off);
-    } else {
-      await _controller.setFlashMode(FlashMode.torch);
-    }
+    _isFlashOn ? await _controller.setFlashMode(FlashMode.off) : await _controller.setFlashMode(FlashMode.torch);
     setState(() => _isFlashOn = !_isFlashOn);
   }
 
@@ -62,71 +62,79 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
     if (_isScanning) return;
     setState(() {
       _isScanning = true;
-      _scanStatus = "جاري استخراج الكود...";
+      _scanStatus = "جاري قراءة الكرت...";
     });
 
     try {
       await _initializeControllerFuture;
-      await _controller.takePicture();
+      final image = await _controller.takePicture();
       
-      // هنا تتم عملية الـ OCR (نستخدم كود تجريبي حالياً)
-      await Future.delayed(const Duration(seconds: 1)); 
-      String dummyCode = "88229944"; // مثال لكود كرت
+      // معالجة الصورة لاستخراج النص
+      final inputImage = InputImage.fromFilePath(image.path);
+      final RecognizedText recognizedText = await _textRecognizer.processImage(inputImage);
+      
+      // تنظيف النص (إزالة المسافات والأسطر الفارغة)
+      List<String> lines = recognizedText.text.split('\n')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
 
-      setState(() {
-        _extractedCode = dummyCode;
-        _scanStatus = "تم استخراج الكود: $_extractedCode";
-        _isLoginEnabled = true;
-        _isScanning = false;
-      });
+      if (lines.isNotEmpty) {
+        _user = lines[0]; // السطر الأول دائماً يوزر
+        // إذا كان هناك سطر ثاني نأخذه ككلمة مرور، وإلا نستخدم اليوزر نفسه ككلمة مرور
+        _pass = lines.length > 1 ? lines[1] : lines[0]; 
+
+        setState(() {
+          _scanStatus = "تم الاستخراج بنجاح ✅\nيوزر: $_user\nباسورد: $_pass";
+          _isLoginEnabled = true;
+          _isScanning = false;
+        });
+      } else {
+        setState(() {
+          _scanStatus = "لم يتم اكتشاف نص، حاول تقريب الكاميرا";
+          _isScanning = false;
+        });
+      }
     } catch (e) {
       setState(() {
-        _scanStatus = "خطأ في التصوير، حاول ثانية";
+        _scanStatus = "حدث خطأ أثناء القراءة";
         _isScanning = false;
       });
     }
   }
 
-  // الدالة الذكية لاكتشاف الرابط وتسجيل الدخول
   Future<void> _smartLogin() async {
     setState(() {
-      _scanStatus = "جاري فحص الشبكة وتسجيل الدخول...";
+      _scanStatus = "جاري محاولة الدخول للشبكة...";
       _isLoginEnabled = false;
     });
 
     try {
-      // محاولة فتح رابط وهمي لإجبار الميكروتيك على التحويل
+      // 1. محاولة اكتشاف صفحة الميكروتيك (الحل الثالث الذكي)
       var request = http.Request('GET', Uri.parse("http://connectivitycheck.gstatic.com/generate_204"));
-      request.followRedirects = false; // لا نريد اتباع التحويل تلقائياً، نريد الإمساك به
+      request.followRedirects = false;
+      var response = await request.send().timeout(const Duration(seconds: 4));
       
-      var response = await request.send().timeout(const Duration(seconds: 5));
-      String finalUrl = "";
-
-      if (response.statusCode == 302 || response.statusCode == 301 || response.statusCode == 307) {
-        // إذا قام الميكروتيك بالتحويل، نأخذ الرابط من الـ Header
-        finalUrl = response.headers['location'] ?? "http://10.0.0.1/login";
-      } else {
-        // إذا لم يحدث تحويل، نستخدم الرابط الافتراضي الأكثر شيوعاً في غزة
-        finalUrl = "http://10.0.0.1/login";
-      }
-
-      // تجهيز رابط تسجيل الدخول النهائي مع الكود
-      // ملاحظة: أغلب ميكروتيك يستخدم بارامتر username أو code
-      Uri loginUri = Uri.parse(finalUrl).replace(queryParameters: {
-        'username': _extractedCode,
-        'password': '', // غالباً الكرت لا يحتاج باسوورد
+      String baseUrl = response.headers['location'] ?? "http://10.0.0.1/login";
+      
+      // 2. إرسال بيانات الدخول (يوزر وباسورد)
+      Uri loginUri = Uri.parse(baseUrl).replace(queryParameters: {
+        'username': _user,
+        'password': _pass,
       });
 
       var loginResponse = await http.get(loginUri).timeout(const Duration(seconds: 10));
 
       if (loginResponse.statusCode == 200) {
-        setState(() => _scanStatus = "تم تسجيل الدخول بنجاح! ✅");
+        setState(() => _scanStatus = "تم تسجيل الدخول! استمتع بالإنترنت 🚀");
       } else {
-        setState(() => _scanStatus = "تم إرسال الطلب، تحقق من الإنترنت.");
+        setState(() => _scanStatus = "تم إرسال الطلب، تأكد من حالة الكرت.");
       }
     } catch (e) {
-      setState(() => _scanStatus = "تأكد من اتصالك بشبكة الواي فاي");
-      _isLoginEnabled = true;
+      setState(() {
+        _scanStatus = "تأكد من اتصالك بالواي فاي";
+        _isLoginEnabled = true;
+      });
     }
   }
 
@@ -138,7 +146,7 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
       body: SafeArea(
         child: Column(
           children: [
-            // 1. الكاميرا المحددة
+            // الكاميرا
             SizedBox(
               height: size.height * 0.45,
               child: Stack(
@@ -152,14 +160,13 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
                       return const Center(child: CircularProgressIndicator(color: Colors.cyan));
                     },
                   ),
-                  // مستطيل البطاقة
                   Center(
                     child: Container(
-                      width: size.width * 0.75,
-                      height: (size.width * 0.75) / 1.58,
+                      width: size.width * 0.8,
+                      height: (size.width * 0.8) / 1.58,
                       decoration: BoxDecoration(
-                        border: Border.all(color: Colors.cyan, width: 2),
-                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.cyan, width: 3),
+                        borderRadius: BorderRadius.circular(15),
                       ),
                     ),
                   ),
@@ -167,15 +174,15 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
               ),
             ),
 
-            // 2. الواجهة والتحكم
+            // التحكم والمعلومات
             Expanded(
-              child: Container(
-                padding: const EdgeInsets.all(24),
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(_scanStatus, textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.cyan)),
+                        style: const TextStyle(fontSize: 18, color: Colors.cyan, fontWeight: FontWeight.bold)),
                     
                     Column(
                       children: [
@@ -183,19 +190,19 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [
                             IconButton(icon: Icon(_isFlashOn ? Icons.flash_on : Icons.flash_off, color: Colors.yellow), 
-                                       onPressed: _toggleFlash, iconSize: 32),
+                                       onPressed: _toggleFlash, iconSize: 30),
                             GestureDetector(
                               onTap: _takePicture,
                               child: Container(
-                                height: 80, width: 80,
+                                height: 75, width: 75,
                                 decoration: const BoxDecoration(color: Colors.cyan, shape: BoxShape.circle),
-                                child: const Icon(Icons.camera_alt, color: Colors.black, size: 40),
+                                child: const Icon(Icons.camera_alt, color: Colors.black, size: 35),
                               ),
                             ),
-                            const SizedBox(width: 48), // للتوازن
+                            const SizedBox(width: 45),
                           ],
                         ),
-                        const SizedBox(height: 40),
+                        const SizedBox(height: 35),
                         SizedBox(
                           width: double.infinity, height: 55,
                           child: ElevatedButton(
@@ -210,7 +217,7 @@ class _GazaWifiScannerState extends State<GazaWifiScanner> {
                         ),
                       ],
                     ),
-                    const Text("Powered by : Sohail Shehada", style: TextStyle(color: Colors.white30, fontSize: 12)),
+                    const Text("Powered by : Sohail Shehada", style: TextStyle(color: Colors.white30, fontSize: 12, fontStyle: FontStyle.italic)),
                   ],
                 ),
               ),
