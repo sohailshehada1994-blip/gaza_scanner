@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "120266672680",
+    "project_id": "gazascanner-ac817",
+    "storage_bucket": "gazascanner-ac817.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:120266672680:android:0a6b61cc5e0043c219c31d",
+        "android_client_info": {
+          "package_name": "com.sohail.gaza_wifi_scanner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDOy9V1UGij4adkTpbIXSG_g3V7u6-983Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
