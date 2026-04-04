@@ -6,34 +6,30 @@ import 'package:http/http.dart' as http;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// نموذج بيانات الكرت
+class WifiCard {
+  String user;
+  String pass;
+  String status; // 'new' (blue), 'active' (green), 'expired' (red)
+  DateTime? expiryTime;
+
+  WifiCard({required this.user, required this.pass, this.status = 'new', this.expiryTime});
+
+  Map<String, dynamic> toJson() => {'user': user, 'pass': pass, 'status': status, 'expiryTime': expiryTime?.toIso8601String()};
+  factory WifiCard.fromJson(Map<String, dynamic> json) => WifiCard(
+    user: json['user'], pass: json['pass'], status: json['status'],
+    expiryTime: json['expiryTime'] != null ? DateTime.parse(json['expiryTime']) : null,
+  );
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final cameras = await availableCameras();
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
-    theme: ThemeData.dark(),
+    theme: ThemeData.dark().copyWith(primaryColor: Colors.cyan),
     home: GazaWifiScanner(camera: cameras.first),
   ));
-}
-
-// نموذج البطاقة المطور
-class WifiCard {
-  String user;
-  String pass;
-  String status; // 'new' (blue), 'active' (green), 'expired' (red)
-  DateTime? activationTime;
-
-  WifiCard({required this.user, required this.pass, this.status = 'new', this.activationTime});
-
-  Map<String, dynamic> toJson() => {
-    'user': user, 'pass': pass, 'status': status, 
-    'time': activationTime?.toIso8601String()
-  };
-
-  factory WifiCard.fromJson(Map<String, dynamic> json) => WifiCard(
-    user: json['user'], pass: json['pass'], status: json['status'],
-    activationTime: json['time'] != null ? DateTime.parse(json['time']) : null
-  );
 }
 
 class GazaWifiScanner extends StatefulWidget {
@@ -45,181 +41,245 @@ class GazaWifiScanner extends StatefulWidget {
 
 class _GazaWifiScannerState extends State<GazaWifiScanner> with WidgetsBindingObserver {
   CameraController? _controller;
+  Future<void>? _initializeControllerFuture;
   final TextRecognizer _textRecognizer = TextRecognizer();
-  List<WifiCard> _wallet = [];
-  String _statusMsg = "جاهز لمسح الكروت";
+  bool _isFlashOn = false;
   bool _isScanning = false;
-  Timer? _globalTimer;
+  String _tempUser = "";
+  String _tempPass = "";
+  List<WifiCard> _wallet = [];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initCamera();
-    _loadData();
-    // تحديث الواجهة والتدقيق كل دقيقة
-    _globalTimer = Timer.periodic(const Duration(minutes: 1), (t) => _refreshLogic());
+    _loadWallet();
   }
 
-  // --- منطق الإدارة والتنظيف ---
-  void _refreshLogic() {
-    DateTime now = DateTime.now();
-    bool changed = false;
-
-    for (var card in _wallet) {
-      // 1. تحويل الأخضر للأحمر بعد 8 ساعات
-      if (card.status == 'active' && card.activationTime != null) {
-        if (now.difference(card.activationTime!).inHours >= 8) {
-          card.status = 'expired';
-          changed = true;
-        }
-      }
-    }
-
-    // 2. التنظيف التلقائي (حذف الأحمر بعد 24 ساعة)
-    _wallet.removeWhere((card) {
-      if (card.status == 'expired' && card.activationTime != null) {
-        if (now.difference(card.activationTime!).inHours >= 32) { // 8 + 24
-          changed = true;
-          return true;
-        }
-      }
-      return false;
-    });
-
-    if (changed) {
-      _saveData();
-      setState(() {});
-    }
-  }
-
-  // --- مراقب الإنترنت الذكي ---
-  Future<void> _checkNetwork() async {
-    try {
-      final res = await http.get(Uri.parse("http://google.com")).timeout(const Duration(seconds: 5));
-      if (res.statusCode != 200) _investigate();
-    } catch (e) { _investigate(); }
-  }
-
-  Future<void> _investigate() async {
-    try {
-      final res = await http.get(Uri.parse("http://10.0.0.1")).timeout(const Duration(seconds: 5));
-      if (res.body.contains("expired") || res.body.contains("login")) {
-        // تنبيه صوتي (ALARM)
-        setState(() => _statusMsg = "⚠️ البطاقة انتهت! فعل كرت جديد");
-      }
-    } catch (e) { /* الشبكة طافية - لا تفعل شيئاً */ }
-  }
-
-  // --- الكاميرا والتعرف على النص ---
   void _initCamera() {
     _controller = CameraController(widget.camera, ResolutionPreset.max);
-    _controller!.initialize().then((_) => setState(() {}));
-  }
-
-  Future<void> _scanCard() async {
-    if (_isScanning) return;
-    setState(() { _isScanning = true; _statusMsg = "جاري الحفظ ككرت جديد (أزرق)..."; });
-
-    final img = await _controller!.takePicture();
-    final recognized = await _textRecognizer.processImage(InputImage.fromFilePath(img.path));
-    
-    String code = "";
-    for (var b in recognized.blocks) {
-      for (var l in b.lines) {
-        String c = l.text.replaceAll(RegExp(r'[^0-9]'), '');
-        if (c.length >= 4 && !l.text.contains('.')) { code = c; break; }
-      }
-    }
-
-    if (code.isNotEmpty) {
-      _wallet.add(WifiCard(user: code, pass: code, status: 'new'));
-      await _saveData();
-      setState(() { _statusMsg = "تم الإضافة للمحفظة ✅"; _isScanning = false; });
-    } else {
-      setState(() { _statusMsg = "فشلت القراءة"; _isScanning = false; });
-    }
-  }
-
-  // --- تسجيل الدخول ---
-  void _activateCard(WifiCard card) {
-    setState(() {
-      // تحويل أي كرت أخضر قديم لأحمر
-      for (var c in _wallet) { if (c.status == 'active') c.status = 'expired'; }
-      card.status = 'active';
-      card.activationTime = DateTime.now();
-      _statusMsg = "البطاقة نشطة الآن (خضراء) 🟢";
-    });
-    _saveData();
-  }
-
-  // --- التخزين ---
-  Future<void> _loadData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('wallet_v2');
-    if (raw != null) {
-      setState(() { _wallet = List<WifiCard>.from(json.decode(raw).map((x) => WifiCard.fromJson(x))); });
-    }
-    _refreshLogic();
-  }
-
-  Future<void> _saveData() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('wallet_v2', json.encode(_wallet.map((x) => x.toJson()).toList()));
+    _initializeControllerFuture = _controller!.initialize();
+    setState(() {});
   }
 
   @override
-  void dispose() { _globalTimer?.cancel(); _controller?.dispose(); super.dispose(); }
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller?.dispose();
+    _textRecognizer.close();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      _setFlash(false);
+      _controller?.dispose();
+    } else if (state == AppLifecycleState.resumed) {
+      _initCamera();
+    }
+  }
+
+  Future<void> _loadWallet() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? data = prefs.getString('wifi_wallet');
+    if (data != null) {
+      List decoded = jsonDecode(data);
+      setState(() {
+        _wallet = decoded.map((item) => WifiCard.fromJson(item)).toList();
+      });
+      _cleanExpiredCards();
+    }
+  }
+
+  Future<void> _saveWallet() async {
+    final prefs = await SharedPreferences.getInstance();
+    prefs.setString('wifi_wallet', jsonEncode(_wallet.map((e) => e.toJson()).toList()));
+  }
+
+  void _cleanExpiredCards() {
+    setState(() {
+      _wallet.removeWhere((card) => card.status == 'expired' && 
+          card.expiryTime != null && DateTime.now().difference(card.expiryTime!).inHours >= 24);
+    });
+    _saveWallet();
+  }
+
+  Future<void> _setFlash(bool turnOn) async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    await _controller!.setFlashMode(turnOn ? FlashMode.torch : FlashMode.off);
+    setState(() => _isFlashOn = turnOn);
+  }
+
+  Future<void> _takePicture() async {
+    if (_isScanning || _controller == null) return;
+    setState(() => _isScanning = true);
+    try {
+      final image = await _controller!.takePicture();
+      final recognizedText = await _textRecognizer.processImage(InputImage.fromFilePath(image.path));
+      List<String> codes = [];
+      for (var block in recognizedText.blocks) {
+        for (var line in block.lines) {
+          String clean = line.text.replaceAll(RegExp(r'[^0-9]'), '').trim();
+          if (clean.length >= 4) codes.add(clean);
+        }
+      }
+      if (codes.isNotEmpty) {
+        setState(() {
+          _tempUser = codes[0];
+          _tempPass = codes.length > 1 ? codes[1] : codes[0];
+          _isScanning = false;
+        });
+      } else {
+        setState(() => _isScanning = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("لم يتم العثور على كود واضع")));
+      }
+    } catch (e) { setState(() => _isScanning = false); }
+  }
+
+  Future<void> _smartLogin(WifiCard card) async {
+    try {
+      var init = await http.get(Uri.parse("http://connectivitycheck.gstatic.com/generate_204")).timeout(Duration(seconds: 4));
+      String url = init.headers['location'] ?? "http://10.0.0.1/login";
+      var res = await http.post(Uri.parse(url), body: {'username': card.user, 'password': card.pass}).timeout(Duration(seconds: 10));
+
+      if (res.body.contains("expired") || res.body.contains("finished") || res.body.contains("انتهى")) {
+        setState(() { card.status = 'expired'; card.expiryTime = DateTime.now(); });
+      } else {
+        for (var c in _wallet) if (c.status == 'active') c.status = 'new';
+        setState(() => card.status = 'active');
+      }
+      _saveWallet();
+    } catch (e) { 
+       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("تأكد من اتصالك بالشبكة")));
+    }
+  }
+
+  void _addToWallet({bool loginImmediately = false}) {
+    final newCard = WifiCard(user: _tempUser, pass: _tempPass);
+    setState(() {
+      _wallet.add(newCard);
+      _tempUser = "";
+      _tempPass = "";
+    });
+    if (loginImmediately) _smartLogin(newCard);
+    _saveWallet();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
     return Scaffold(
-      appBar: AppBar(title: const Text("Wifi Master V2"), actions: [
-        IconButton(icon: const Icon(Icons.account_balance_wallet), onPressed: _showWallet)
-      ]),
-      body: Column(
+      appBar: AppBar(
+        title: Text("Gaza Scanner"),
+        actions: [
+          IconButton(icon: Icon(Icons.account_balance_wallet, color: Colors.cyan), 
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => WalletPage(wallet: _wallet, onLogin: _smartLogin, onUpdate: _saveWallet)))),
+          IconButton(icon: Icon(_isFlashOn ? Icons.flash_on : Icons.flash_off, color: Colors.yellow), onPressed: () => _setFlash(!_isFlashOn))
+        ],
+      ),
+      body: Stack(
         children: [
-          Expanded(flex: 2, child: Stack(children: [
-            if (_controller != null && _controller!.value.isInitialized) CameraPreview(_controller!),
-            Center(child: Container(width: 250, height: 150, decoration: BoxDecoration(border: Border.all(color: Colors.blue, width: 2), borderRadius: BorderRadius.circular(15)))),
-          ])),
-          Padding(padding: const EdgeInsets.all(20), child: Column(children: [
-            Text(_statusMsg, style: const TextStyle(fontSize: 18, color: Colors.blue, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            ElevatedButton.icon(onPressed: _scanCard, icon: const Icon(Icons.add_a_photo), label: const Text("تصوير كرت جديد")),
-            const SizedBox(height: 15),
-            const Text("Powered by : Sohail Shehada", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontStyle: FontStyle.italic)),
-          ]))
+          // خلفية الكاميرا
+          Column(
+            children: [
+              Expanded(
+                child: FutureBuilder(
+                  future: _initializeControllerFuture,
+                  builder: (context, snap) => (snap.connectionState == ConnectionState.done) 
+                    ? CameraPreview(_controller!) : Center(child: CircularProgressIndicator()),
+                ),
+              ),
+              Container(
+                height: 120,
+                color: Colors.black,
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (_tempUser.isEmpty) GestureDetector(
+                        onTap: _takePicture,
+                        child: Container(height: 70, width: 70, decoration: BoxDecoration(color: Colors.cyan, shape: BoxShape.circle), child: Icon(Icons.camera_alt, color: Colors.black, size: 35)),
+                      ),
+                      SizedBox(height: 8),
+                      Text("Powered by Sohail Shehada", style: TextStyle(color: Colors.red, fontSize: 12)),
+                    ],
+                  ),
+                ),
+              )
+            ],
+          ),
+          // إطار التركيز
+          if (_tempUser.isEmpty) Center(child: Container(width: size.width*0.75, height: 180, decoration: BoxDecoration(border: Border.all(color: Colors.cyan.withOpacity(0.5), width: 2), borderRadius: BorderRadius.circular(15)))),
+          
+          // واجهة الأزرار عند اكتشاف كود
+          if (_tempUser.isNotEmpty) Container(
+            color: Colors.black.withOpacity(0.8),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text("تم اكتشاف كود: $_tempUser", style: TextStyle(fontSize: 22, color: Colors.cyan, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 30),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                    ElevatedButton.icon(icon: Icon(Icons.login), label: Text("دخول وحفظ"), onPressed: () => _addToWallet(loginImmediately: true), style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: EdgeInsets.symmetric(horizontal: 20, vertical: 15))),
+                    ElevatedButton.icon(icon: Icon(Icons.save), label: Text("حفظ فقط"), onPressed: () => _addToWallet(), style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, padding: EdgeInsets.symmetric(horizontal: 20, vertical: 15))),
+                  ]),
+                  TextButton(onPressed: () => setState(()=> _tempUser = ""), child: Text("إلغاء", style: TextStyle(color: Colors.white70)))
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
+}
 
-  void _showWallet() {
-    showModalBottomSheet(context: context, isScrollControlled: true, builder: (c) => Container(
-      height: 500, padding: const EdgeInsets.all(20),
-      child: Column(children: [
-        const Text("المحفظة الذكية", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-        const Divider(),
-        Expanded(child: ListView.builder(
-          itemCount: _wallet.length,
-          itemBuilder: (c, i) {
-            final card = _wallet[i];
-            Color col = card.status == 'active' ? Colors.green : (card.status == 'expired' ? Colors.red : Colors.blue);
-            String timeText = "";
-            if (card.status == 'active' && card.activationTime != null) {
-              int mins = 480 - DateTime.now().difference(card.activationTime!).inMinutes;
-              timeText = " - متبقي ${mins ~/ 60}س ${mins % 60}د";
-            }
-            return ListTile(
-              leading: Icon(Icons.wifi, color: col),
-              title: Text("كود: ${card.user} $timeText"),
-              subtitle: Text(card.status == 'active' ? "نشطة حالياً" : (card.status == 'new' ? "جديدة" : "منتهية")),
-              onTap: card.status == 'new' ? () => _activateCard(card) : null,
-            );
-          },
-        ))
-      ]),
-    ));
+// --- صفحة المحفظة المنفصلة ---
+class WalletPage extends StatefulWidget {
+  final List<WifiCard> wallet;
+  final Function(WifiCard) onLogin;
+  final Function onUpdate;
+  WalletPage({required this.wallet, required this.onLogin, required this.onUpdate});
+
+  @override
+  _WalletPageState createState() => _WalletPageState();
+}
+
+class _WalletPageState extends State<WalletPage> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text("محفظة البطاقات")),
+      body: widget.wallet.isEmpty 
+        ? Center(child: Text("المحفظة فارغة، قم بتصوير كروت أولاً"))
+        : ListView.builder(
+            itemCount: widget.wallet.length,
+            itemBuilder: (context, index) {
+              final card = widget.wallet[index];
+              Color cardColor = card.status == 'active' ? Colors.green : (card.status == 'expired' ? Colors.red : Colors.blue);
+              return Card(
+                margin: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                color: cardColor.withOpacity(0.15),
+                shape: RoundedRectangleBorder(side: BorderSide(color: cardColor), borderRadius: BorderRadius.circular(12)),
+                child: ListTile(
+                  title: Text("كود: ${card.user}", style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text(card.status == 'active' ? "متصل حالياً 🟢" : (card.status == 'expired' ? "منتهية الصلاحية 🔴" : "بطاقة جديدة 🔵")),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (card.status != 'expired') IconButton(icon: Icon(Icons.login, color: Colors.white), onPressed: () { widget.onLogin(card); setState(() {}); }),
+                    IconButton(icon: Icon(Icons.info_outline), onPressed: () {
+                      showDialog(context: context, builder: (c) => AlertDialog(title: Text("تفاصيل البطاقة"), content: Text("اسم المستخدم: ${card.user}\nكلمة المرور: ${card.pass}"), actions: [TextButton(onPressed: ()=>Navigator.pop(c), child: Text("إغلاق"))]));
+                    }),
+                    if (card.status == 'active') IconButton(icon: Icon(Icons.logout, color: Colors.orange), onPressed: () { setState(() => card.status = 'new'); widget.onUpdate(); }),
+                    IconButton(icon: Icon(Icons.delete_sweep, color: Colors.redAccent), onPressed: () { setState(() => widget.wallet.removeAt(index)); widget.onUpdate(); }),
+                  ]),
+                ),
+              );
+            },
+          ),
+    );
   }
 }
