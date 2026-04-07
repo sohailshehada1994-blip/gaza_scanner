@@ -6,16 +6,17 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'dart:convert';
+import 'screens/login_screen.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // تأكد من تهيئة Firebase قبل تشغيل التطبيق
   await Firebase.initializeApp(); 
   final cameras = await availableCameras();
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark(),
-    home: GazaScannerHome(cameras: cameras),
+    home: LoginScreen(), 
   ));
 }
 
