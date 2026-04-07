@@ -60,7 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
               keyboardType: TextInputType.phone,
               style: TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                hintText: "059XXXXXXXX",
+                hintText: "05XXXXXXXX",
                 hintStyle: TextStyle(color: Colors.grey),
                 filled: true,
                 fillColor: Colors.white10,
