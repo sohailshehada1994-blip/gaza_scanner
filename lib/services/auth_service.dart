@@ -15,35 +15,31 @@ class AuthService {
     ],
   );
 
-  // تسجيل الدخول بجوجل
-  Future<User?> signInWithGoogle() async {
+Future<User?> signInWithGoogle() async {
     try {
-      // 1. بدء عملية تسجيل الدخول
+      // 1. فتح نافذة اختيار الحساب
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        print("DEBUG: تم إلغاء تسجيل الدخول من قبل المستخدم");
-        return null;
-      }
+      if (googleUser == null) return null;
 
-      // 2. الحصول على تفاصيل المصادقة
+      // 2. طلب البيانات الأساسية فقط
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
 
-      // 3. إنشاء كcredential جديد
-      final AuthCredential credential = GoogleAuthProvider.credential(
+      // 3. الربط مع فايربيس (هنا السر: نستخدم الـ Tokens مباشرة)
+      final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
-      // 4. تسجيل الدخول في Firebase
-      UserCredential userCredential = await _auth.signInWithCredential(credential);
-
-      // 5. تحديث بيانات المستخدم في Firestore (إجراء وقائي)
-      if (userCredential.user != null) {
-        await _db.collection('users').doc(userCredential.user!.uid).set({
-          'email': userCredential.user!.email,
-          'lastLogin': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      }
+      // 4. تسجيل الدخول
+      final UserCredential userCredential = await _auth.signInWithCredential(credential);
+      
+      return userCredential.user;
+    } catch (e) {
+      // إذا فشل، اطبع الخطأ عشان نعرفه من الـ Logcat
+      print("Error during Google Sign-In: $e");
+      return null;
+    }
+  }
 
       return userCredential.user;
     } catch (e) {
