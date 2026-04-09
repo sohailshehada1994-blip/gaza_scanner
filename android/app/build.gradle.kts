@@ -31,6 +31,7 @@ android {
         versionName = flutter.versionName
         multiDexEnabled = true
     }
+
     signingConfigs {
         create("debug") {
             storeFile = file("debug.keystore")
@@ -48,6 +49,7 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
 flutter {
     source = "../.."
 }
