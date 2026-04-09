@@ -24,7 +24,7 @@ class _LoginScreenState extends State<LoginScreen> {
           : ElevatedButton(
               onPressed: () async {
                 setState(() => _isLoading = true);
-                User? user = await _authService.signInWithGoogle();
+                User? user = await _authService.signInWithGoogle(context);
                 // هنا نضع المنطق الخاص بك لاحقاً
                 setState(() => _isLoading = false);
               },
