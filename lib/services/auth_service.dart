@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/services.dart'; 
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 
 class AuthService {
@@ -12,8 +12,8 @@ class AuthService {
     clientId: "120266672680-rgc1dh7pvui9soogopm2lfodre13cgpn.apps.googleusercontent.com",
   );
 
-  // تسجيل الدخول بجوجل
-  Future<User?> signInWithGoogle() async {
+  // أضفنا الـ BuildContext هنا عشان نقدر نطلع الـ SnackBar
+  Future<User?> signInWithGoogle(BuildContext context) async {
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) return null;
@@ -28,18 +28,22 @@ class AuthService {
       UserCredential userCredential = await _auth.signInWithCredential(credential);
       return userCredential.user;
     } on PlatformException catch (e) {
-      final snackBar = SnackBar(
-        content: Text("كود الخطأ: ${e.code}"),
-        backgroundColor: Colors.red,
+      // إظهار كود الخطأ على شاشة الجوال فوراً
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("كود الخطأ من جوجل: ${e.code}"),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 5),
+        ),
       );
-      ScaffoldMessenger.of(Get.context!).showSnackBar(snackBar);
-      
-      print("Error: ${e.code}");
+      print("Google Error: ${e.code}");
+      return null;
+    } catch (e) {
+      print("General Error: $e");
       return null;
     }
   }
 
-  // فحص رقم الجوال
   Future<bool> isPhoneNumberLinked(String uid) async {
     try {
       DocumentSnapshot userDoc = await _db.collection('users').doc(uid).get();
@@ -53,7 +57,6 @@ class AuthService {
     }
   }
 
-  // ربط الرقم
   Future<void> linkPhoneNumber(String uid, String phone, String name) async {
     try {
       await _db.collection('users').doc(uid).set({
