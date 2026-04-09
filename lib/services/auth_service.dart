@@ -1,14 +1,12 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/services.dart'; // مهمة جداً عشان PlatformException
-import 'package:get/get.dart'; // عشان نطلع الرسالة على الشاشة
+import 'package:flutter/services.dart'; 
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // ملاحظة: تأكد إن الـ clientId هذا هو الـ Web Client ID من صفحة Google Cloud
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     clientId: "120266672680-rgc1dh7pvui9soogopm2lfodre13cgpn.apps.googleusercontent.com",
   );
@@ -29,17 +27,14 @@ class AuthService {
       UserCredential userCredential = await _auth.signInWithCredential(credential);
       return userCredential.user;
     } on PlatformException catch (e) {
-      // هاد الجزء اللي رح يحل اللغز ويطلع لك Error Code على الشاشة
-      Get.defaultDialog(
-        title: "كود الخطأ: ${e.code}",
-        middleText: "الرسالة: ${e.message}\nالتفاصيل: ${e.details}",
-        confirm: TextButton(onPressed: () => Get.back(), child: Text("تم")),
-      );
-      print("Google Sign-In Platform Error: ${e.code} - ${e.message}");
+      // هذه الرسالة رح تظهر في Logs الـ Codemagic بشكل واضح جداً
+      print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+      print("GOOGLE ERROR CODE: ${e.code}");
+      print("GOOGLE ERROR MESSAGE: ${e.message}");
+      print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
       return null;
     } catch (e) {
-      Get.snackbar("خطأ عام", e.toString());
-      print("Google Sign-In General Error: $e");
+      print("GENERAL ERROR: $e");
       return null;
     }
   }
