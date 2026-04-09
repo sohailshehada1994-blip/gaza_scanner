@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart'; 
+import 'package:flutter/material.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -27,14 +28,13 @@ class AuthService {
       UserCredential userCredential = await _auth.signInWithCredential(credential);
       return userCredential.user;
     } on PlatformException catch (e) {
-      // هذه الرسالة رح تظهر في Logs الـ Codemagic بشكل واضح جداً
-      print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-      print("GOOGLE ERROR CODE: ${e.code}");
-      print("GOOGLE ERROR MESSAGE: ${e.message}");
-      print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-      return null;
-    } catch (e) {
-      print("GENERAL ERROR: $e");
+      final snackBar = SnackBar(
+        content: Text("كود الخطأ: ${e.code}"),
+        backgroundColor: Colors.red,
+      );
+      ScaffoldMessenger.of(Get.context!).showSnackBar(snackBar);
+      
+      print("Error: ${e.code}");
       return null;
     }
   }
