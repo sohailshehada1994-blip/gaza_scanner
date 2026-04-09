@@ -32,18 +32,19 @@ android {
         multiDexEnabled = true
     }
     signingConfigs {
-        debug {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
+        create("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
+
     buildTypes {
-        debug {
+        getByName("debug") {
             signingConfig = signingConfigs.getByName("debug")
         }
-        release {
+        getByName("release") {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
