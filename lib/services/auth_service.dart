@@ -12,7 +12,7 @@ class AuthService {
     clientId: "120266672680-rgc1dh7pvui9soogopm2lfodre13cgpn.apps.googleusercontent.com",
   );
 
-  // أضفنا الـ BuildContext هنا عشان نقدر نطلع الـ SnackBar
+  // تسجيل الدخول بجوجل مع إظهار SnackBar عند الخطأ
   Future<User?> signInWithGoogle(BuildContext context) async {
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
@@ -28,12 +28,12 @@ class AuthService {
       UserCredential userCredential = await _auth.signInWithCredential(credential);
       return userCredential.user;
     } on PlatformException catch (e) {
-      // إظهار كود الخطأ على شاشة الجوال فوراً
+      // إظهار كود الخطأ على شاشة الجوال (مهم جداً للتشخيص)
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("كود الخطأ من جوجل: ${e.code}"),
           backgroundColor: Colors.red,
-          duration: Duration(seconds: 5),
+          duration: const Duration(seconds: 5),
         ),
       );
       print("Google Error: ${e.code}");
@@ -44,6 +44,7 @@ class AuthService {
     }
   }
 
+  // فحص إذا كان رقم الجوال مرتبط (مفيد للمحفظة لاحقاً)
   Future<bool> isPhoneNumberLinked(String uid) async {
     try {
       DocumentSnapshot userDoc = await _db.collection('users').doc(uid).get();
@@ -57,15 +58,23 @@ class AuthService {
     }
   }
 
+  // ربط رقم الهاتف والاسم بالـ UID الخاص بالمستخدم في Firestore
   Future<void> linkPhoneNumber(String uid, String phone, String name) async {
     try {
       await _db.collection('users').doc(uid).set({
         'uid': uid,
         'name': name,
         'phoneNumber': phone,
+        'lastUpdate': FieldValue.serverTimestamp(), // ضفت لك تايم ستامب عشان تعرف متى سجل
       }, SetOptions(merge: true));
     } catch (e) {
       print("Firestore Error: $e");
     }
+  }
+
+  // دالة تسجيل الخروج (مهمة للنظام الجديد)
+  Future<void> signOut() async {
+    await _googleSignIn.signOut();
+    await _auth.signOut();
   }
 }
