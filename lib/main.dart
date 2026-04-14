@@ -5,11 +5,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // أضفنا هاد للتحقق من المستخدم
+import 'package:firebase_auth/firebase_auth.dart'; 
 import 'dart:convert';
 import 'screens/login_screen.dart';
 
-// تعريف الكاميرات كمتغير عالمي لسهولة الوصول
 List<CameraDescription> cameras = [];
 
 void main() async {
@@ -20,7 +19,6 @@ void main() async {
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark(),
-    // التغيير الأول: يفتح مباشرة على الرئيسية كضيف
     home: const GazaScannerHome(), 
   ));
 }
@@ -35,10 +33,13 @@ class GazaScannerHome extends StatefulWidget {
 class _GazaScannerHomeState extends State<GazaScannerHome> {
   late CameraController _controller;
   bool _isProcessing = false;
-  List<Map<String, String>> _savedCards = [];
+  List<Map<String, dynamic>> _savedCards = []; // تم تغيير النوع لدعم bool اللون
   
-  // متغير للتحكم في عرض (الماسح) أو (المحفظة)
   int _selectedIndex = 0; 
+
+  // متغيرات مؤقتة لحمل بيانات الكرت الممسوح قبل اتخاذ قرار الحفظ
+  String? _scannedUser;
+  String? _scannedPass;
 
   @override
   void initState() {
@@ -52,43 +53,43 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
     _listenForIncomingCards(); 
   }
 
-  // --- 1. إدارة الذاكرة المحلية (المحفظة) ---
   Future<void> _loadCards() async {
     final prefs = await SharedPreferences.getInstance();
     final String? cardsData = prefs.getString('saved_cards');
     if (cardsData != null) {
       setState(() {
-        _savedCards = List<Map<String, String>>.from(
-          json.decode(cardsData).map((item) => Map<String, String>.from(item))
-        );
+        _savedCards = List<Map<String, dynamic>>.from(json.decode(cardsData));
       });
     }
   }
 
-  Future<void> _saveCard(String user, String pass) async {
+  // تعديل منطق الحفظ ليدعم "الحالة" (مسجل أو ضيف)
+  Future<void> _saveCard(String user, String pass, bool isRegistered) async {
     final prefs = await SharedPreferences.getInstance();
     _savedCards.add({
       'user': user,
       'pass': pass,
+      'isRegistered': isRegistered, // لتحديد لون البطاقة لاحقاً
       'date': DateTime.now().toString().split('.')[0],
     });
     await prefs.setString('saved_cards', json.encode(_savedCards));
-    setState(() {});
+    setState(() {
+      _scannedUser = null; // تفريغ البيانات المؤقتة بعد الحفظ
+      _scannedPass = null;
+    });
   }
 
-  // --- 2. إدارة السحاب (Firebase) - محمي بالتحقق ---
   void _listenForIncomingCards() {
-    // السحاب لا يعمل إلا إذا كان هناك مستخدم مسجل دخول
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     FirebaseFirestore.instance
         .collection('transfers')
-        .where('receiver', isEqualTo: user.email) // نستخدم إيميل المستخدم الحقيقي
+        .where('receiver', isEqualTo: user.email) 
         .snapshots()
         .listen((snapshot) {
       for (var doc in snapshot.docs) {
-        _saveCard(doc['user'], doc['pass']);
+        _saveCard(doc['user'], doc['pass'], true);
         doc.reference.delete();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("🚀 وصلك كرت جديد عبر الإنترنت!")),
@@ -125,7 +126,6 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
     }
   }
 
-  // --- 3. محرك المسح الضوئي (متاح للجميع كضيف) ---
   Future<void> _scanImage() async {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
@@ -140,20 +140,17 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
         for (TextLine line in block.lines) {
           String cleanText = line.text.replaceAll(RegExp(r'\s+'), '');
           if (cleanText.contains(RegExp(r'[0-9]{5,15}'))) {
-            if (user == null) {
-              user = cleanText;
-            } else {
-              pass = cleanText;
-            }
+            if (user == null) { user = cleanText; } else { pass = cleanText; }
           }
         }
       }
 
       if (user != null && pass != null) {
-        await _saveCard(user, pass);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("✅ تم حفظ الكرت محلياً: $user")),
-        );
+        setState(() {
+          _scannedUser = user;
+          _scannedPass = pass;
+        });
+        ScannedResultFound(); // تنبيه بنجاح القراءة
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("⚠️ لم يتم العثور على أرقام واضحة")),
@@ -165,7 +162,12 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
     }
   }
 
-  // حوار المطالبة بتسجيل الدخول
+  void ScannedResultFound() {
+     ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("✅ تم استخراج البيانات، اختر وسيلة الحفظ")),
+     );
+  }
+
   void _showLoginRequiredDialog() {
     showDialog(
       context: context,
@@ -191,26 +193,26 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_selectedIndex == 0 ? "ماسح الكروت" : "محفظتي الآمنة"),
-        actions: [
-          IconButton(
-            icon: Icon(FirebaseAuth.instance.currentUser != null ? Icons.logout : Icons.person_add),
-            onPressed: () {
-              if (FirebaseAuth.instance.currentUser != null) {
-                FirebaseAuth.instance.signOut();
-                setState(() {});
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم تسجيل الخروج")));
-              } else {
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
-              }
-            },
-          )
+      ),
+      body: Column(
+        children: [
+          Expanded(child: _selectedIndex == 0 ? _buildScannerUI() : _buildWalletUI()),
+          // التوقيع أسفل التطبيق
+          Container(
+            padding: const EdgeInsets.all(10),
+            width: double.infinity,
+            color: Colors.black,
+            child: const Text(
+              "Powered by: Sohail Salim",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ),
         ],
       ),
-      body: _selectedIndex == 0 ? _buildScannerUI() : _buildWalletUI(),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) {
-          // حماية المحفظة: لا تفتح إلا للمسجلين
           if (index == 1 && FirebaseAuth.instance.currentUser == null) {
             _showLoginRequiredDialog();
           } else {
@@ -225,13 +227,11 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
     );
   }
 
-  // واجهة الماسح (متاحة للضيف)
   Widget _buildScannerUI() {
     return Column(
       children: [
         if (_controller.value.isInitialized)
           Container(
-            height: 300,
             margin: const EdgeInsets.all(15),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(20),
@@ -239,42 +239,89 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(17),
-              child: CameraPreview(_controller),
+              child: AspectRatio(
+                aspectRatio: 16 / 9, // الكاميرا بالعرض
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CameraPreview(_controller),
+                    // مستطيل تحديد الكرت
+                    Container(
+                      width: 250,
+                      height: 140,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.white.withOpacity(0.5), width: 2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.all(20),
-          child: ElevatedButton.icon(
-            onPressed: _scanImage,
-            icon: const Icon(Icons.camera),
-            label: Text(_isProcessing ? "جاري القراءة..." : "إمسح الكرت الحين"),
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 60),
-              backgroundColor: Colors.blueAccent,
+        
+        if (_scannedUser == null)
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: ElevatedButton.icon(
+              onPressed: _scanImage,
+              icon: const Icon(Icons.camera),
+              label: Text(_isProcessing ? "جاري القراءة..." : "مسح البطاقة"),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 60),
+                backgroundColor: Colors.blueAccent,
+              ),
+            ),
+          )
+        else
+          // ظهور الأزرار بعد المسح الناجح
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                       if (FirebaseAuth.instance.currentUser != null) {
+                          _saveCard(_scannedUser!, _scannedPass!, true);
+                       } else {
+                          _showLoginRequiredDialog();
+                       }
+                    },
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size(0, 50)),
+                    child: const Text("تسجيل الدخول"),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => _saveCard(_scannedUser!, _scannedPass!, false),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, minimumSize: const Size(0, 50)),
+                    child: const Text("حفظ البطاقة"),
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-        const Text("💡 يمكنك مسح الكروت وحفظها على الجهاز كضيف", style: TextStyle(color: Colors.grey)),
       ],
     );
   }
 
-  // واجهة المحفظة (تحتاج تسجيل دخول)
   Widget _buildWalletUI() {
     return _savedCards.isEmpty 
       ? const Center(child: Text("المحفظة خالية"))
       : ListView.builder(
           itemCount: _savedCards.length,
           itemBuilder: (context, index) {
+            final card = _savedCards[index];
+            final bool isGreen = card['isRegistered'] ?? false; // تحديد اللون
             return Card(
+              color: isGreen ? Colors.green.withOpacity(0.2) : Colors.blue.withOpacity(0.2),
               margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
               child: ListTile(
-                title: Text("يوزر: ${_savedCards[index]['user']}"),
-                subtitle: Text("باسورد: ${_savedCards[index]['pass']}"),
-                trailing: IconButton(
-                  icon: const Icon(Icons.cloud_upload, color: Colors.orange),
-                  onPressed: () => _sendViaCloud(index),
-                ),
+                title: Text("يوزر: ${card['user']}"),
+                subtitle: Text("باسورد: ${card['pass']}"),
+                trailing: Icon(isGreen ? Icons.verified : Icons.save_alt, color: isGreen ? Colors.green : Colors.blue),
               ),
             );
           },
