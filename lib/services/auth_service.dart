@@ -12,7 +12,7 @@ class AuthService {
     clientId: "120266672680-rgc1dh7pvui9soogopm2lfodre13cgpn.apps.googleusercontent.com",
   );
 
-  // تسجيل الدخول بجوجل مع إظهار SnackBar عند الخطأ
+  // تسجيل الدخول بجوجل مع إظهار تفاصيل الخطأ للتشخيص
   Future<User?> signInWithGoogle(BuildContext context) async {
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
@@ -28,23 +28,30 @@ class AuthService {
       UserCredential userCredential = await _auth.signInWithCredential(credential);
       return userCredential.user;
     } on PlatformException catch (e) {
-      // إظهار كود الخطأ على شاشة الجوال (مهم جداً للتشخيص)
+      // إظهار كود الخطأ التقني (مثل 12500 أو 10)
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("كود الخطأ من جوجل: ${e.code}"),
+          content: Text("خطأ نظام (Platform): ${e.code}\n${e.message}"),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
+          duration: const Duration(seconds: 8),
         ),
       );
-      print("Google Error: ${e.code}");
       return null;
     } catch (e) {
-      print("General Error: $e");
+      // إظهار تفاصيل الخطأ العام (هنا سيظهر النص الكامل للعلة)
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("تفاصيل الخطأ: ${e.toString()}"),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 10),
+        ),
+      );
+      print("Full Error Log: $e");
       return null;
     }
   }
 
-  // فحص إذا كان رقم الجوال مرتبط (مفيد للمحفظة لاحقاً)
+  // فحص إذا كان رقم الجوال مرتبط
   Future<bool> isPhoneNumberLinked(String uid) async {
     try {
       DocumentSnapshot userDoc = await _db.collection('users').doc(uid).get();
@@ -58,23 +65,27 @@ class AuthService {
     }
   }
 
-  // ربط رقم الهاتف والاسم بالـ UID الخاص بالمستخدم في Firestore
+  // ربط رقم الهاتف والاسم في Firestore
   Future<void> linkPhoneNumber(String uid, String phone, String name) async {
     try {
       await _db.collection('users').doc(uid).set({
         'uid': uid,
         'name': name,
         'phoneNumber': phone,
-        'lastUpdate': FieldValue.serverTimestamp(), // ضفت لك تايم ستامب عشان تعرف متى سجل
+        'lastUpdate': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {
       print("Firestore Error: $e");
     }
   }
 
-  // دالة تسجيل الخروج (مهمة للنظام الجديد)
+  // تسجيل الخروج
   Future<void> signOut() async {
-    await _googleSignIn.signOut();
-    await _auth.signOut();
+    try {
+      await _googleSignIn.signOut();
+      await _auth.signOut();
+    } catch (e) {
+      print("SignOut Error: $e");
+    }
   }
 }
