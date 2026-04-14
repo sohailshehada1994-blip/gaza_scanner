@@ -5,24 +5,28 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // أضفنا هاد للتحقق من المستخدم
 import 'dart:convert';
 import 'screens/login_screen.dart';
-import 'package:firebase_core/firebase_core.dart';
+
+// تعريف الكاميرات كمتغير عالمي لسهولة الوصول
+List<CameraDescription> cameras = [];
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(); 
-  final cameras = await availableCameras();
+  cameras = await availableCameras();
+  
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark(),
-    home: LoginScreen(), 
+    // التغيير الأول: يفتح مباشرة على الرئيسية كضيف
+    home: const GazaScannerHome(), 
   ));
 }
 
 class GazaScannerHome extends StatefulWidget {
-  final List<CameraDescription> cameras;
-  const GazaScannerHome({super.key, required this.cameras});
+  const GazaScannerHome({super.key});
 
   @override
   State<GazaScannerHome> createState() => _GazaScannerHomeState();
@@ -32,17 +36,20 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
   late CameraController _controller;
   bool _isProcessing = false;
   List<Map<String, String>> _savedCards = [];
+  
+  // متغير للتحكم في عرض (الماسح) أو (المحفظة)
+  int _selectedIndex = 0; 
 
   @override
   void initState() {
     super.initState();
-    _controller = CameraController(widget.cameras[0], ResolutionPreset.high);
+    _controller = CameraController(cameras[0], ResolutionPreset.high);
     _controller.initialize().then((_) {
       if (!mounted) return;
       setState(() {});
     });
-    _loadCards(); // تحميل الكروت القديمة من الذاكرة
-    _listenForIncomingCards(); // تشغيل "الرادار" لاستقبال الكروت عبر الإنترنت
+    _loadCards(); 
+    _listenForIncomingCards(); 
   }
 
   // --- 1. إدارة الذاكرة المحلية (المحفظة) ---
@@ -69,17 +76,20 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
     setState(() {});
   }
 
-  // --- 2. إدارة السحاب (Firebase) ---
+  // --- 2. إدارة السحاب (Firebase) - محمي بالتحقق ---
   void _listenForIncomingCards() {
-    // رادار بيسمع لأي كرت موجه لـ "Gaza_User"
+    // السحاب لا يعمل إلا إذا كان هناك مستخدم مسجل دخول
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
     FirebaseFirestore.instance
         .collection('transfers')
-        .where('receiver', isEqualTo: 'Gaza_User') 
+        .where('receiver', isEqualTo: user.email) // نستخدم إيميل المستخدم الحقيقي
         .snapshots()
         .listen((snapshot) {
       for (var doc in snapshot.docs) {
         _saveCard(doc['user'], doc['pass']);
-        doc.reference.delete(); // حذف فوري لضمان المجانية
+        doc.reference.delete();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("🚀 وصلك كرت جديد عبر الإنترنت!")),
         );
@@ -88,14 +98,20 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
   }
 
   Future<void> _sendViaCloud(int index) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _showLoginRequiredDialog();
+      return;
+    }
+
     try {
       await FirebaseFirestore.instance.collection('transfers').add({
         'user': _savedCards[index]['user'],
         'pass': _savedCards[index]['pass'],
-        'receiver': 'Gaza_User', // في النسخة الجاي بنخلي المستخدم يختار المستلم
+        'receiver': 'Gaza_User', 
+        'sender': user.email,
         'timestamp': FieldValue.serverTimestamp(),
       });
-      // حذف الكرت من عندك بعد الإرسال الناجح
       setState(() => _savedCards.removeAt(index));
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('saved_cards', json.encode(_savedCards));
@@ -109,7 +125,7 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
     }
   }
 
-  // --- 3. محرك المسح الضوئي (OCR) ---
+  // --- 3. محرك المسح الضوئي (متاح للجميع كضيف) ---
   Future<void> _scanImage() async {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
@@ -120,7 +136,6 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
       final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
       
       String? user, pass;
-      // منطق ذكي لاستخراج الأرقام الطويلة (اليوزر والباسورد)
       for (TextBlock block in recognizedText.blocks) {
         for (TextLine line in block.lines) {
           String cleanText = line.text.replaceAll(RegExp(r'\s+'), '');
@@ -137,11 +152,11 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
       if (user != null && pass != null) {
         await _saveCard(user, pass);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("✅ تم مسح وحفظ الكرت: $user")),
+          SnackBar(content: Text("✅ تم حفظ الكرت محلياً: $user")),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("⚠️ لم يتم العثور على أرقام واضحة.. حاول مرة أخرى")),
+          const SnackBar(content: Text("⚠️ لم يتم العثور على أرقام واضحة")),
         );
       }
       textRecognizer.close();
@@ -150,111 +165,120 @@ class _GazaScannerHomeState extends State<GazaScannerHome> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Gaza Scanner Pro"),
-        centerTitle: true,
-      ),
-      body: Column(
-        children: [
-          // معاينة الكاميرا
-          if (_controller.value.isInitialized)
-            Container(
-              height: 250,
-              margin: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(15),
-                border: Border.all(color: Colors.green, width: 2),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(13),
-                child: CameraPreview(_controller),
-              ),
-            ),
-          
-          // زر المسح
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: ElevatedButton.icon(
-              onPressed: _scanImage,
-              icon: const Icon(Icons.flash_on),
-              label: Text(_isProcessing ? "جاري المعالجة..." : "إمسح كرت الآن"),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                minimumSize: const Size(double.infinity, 50),
-              ),
-            ),
-          ),
-          
-          const Padding(
-            padding: EdgeInsets.all(15.0),
-            child: Text("📂 محفظة الكروت الممسوحة", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ),
-
-          // قائمة الكروت
-          Expanded(
-            child: _savedCards.isEmpty 
-              ? const Center(child: Text("المحفظة خالية.. ابدأ المسح!"))
-              : ListView.builder(
-                  itemCount: _savedCards.length,
-                  itemBuilder: (context, index) {
-                    return Card(
-                      elevation: 4,
-                      margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-                      child: ListTile(
-                        leading: const Icon(Icons.wifi_tethering, color: Colors.green),
-                        title: Text("المستخدم: ${_savedCards[index]['user']}"),
-                        subtitle: Text("كلمة السر: ${_savedCards[index]['pass']}"),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // زر الـ QR
-                            IconButton(
-                              icon: const Icon(Icons.qr_code, color: Colors.blue),
-                              onPressed: () => _showQRDialog(_savedCards[index]),
-                            ),
-                            // زر السحاب
-                            IconButton(
-                              icon: const Icon(Icons.cloud_upload, color: Colors.orange),
-                              onPressed: () => _sendViaCloud(index),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+  // حوار المطالبة بتسجيل الدخول
+  void _showLoginRequiredDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("حماية البيانات"),
+        content: const Text("يجب تسجيل الدخول باستخدام جيميل لتتمكن من استخدام ميزات السحاب والمحفظة الآمنة."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("لاحقاً")),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
+            },
+            child: const Text("تسجيل دخول"),
           ),
         ],
       ),
     );
   }
 
-  void _showQRDialog(Map<String, String> card) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("مسح سريع QR"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text("اجعل الطرف الآخر يمسح هذا الكود:"),
-            const SizedBox(height: 20),
-            QrImageView(
-              data: json.encode(card),
-              version: QrVersions.auto,
-              size: 200.0,
-              backgroundColor: Colors.white,
-            ),
-          ],
-        ),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_selectedIndex == 0 ? "ماسح الكروت" : "محفظتي الآمنة"),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("إغلاق")),
+          IconButton(
+            icon: Icon(FirebaseAuth.instance.currentUser != null ? Icons.logout : Icons.person_add),
+            onPressed: () {
+              if (FirebaseAuth.instance.currentUser != null) {
+                FirebaseAuth.instance.signOut();
+                setState(() {});
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم تسجيل الخروج")));
+              } else {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
+              }
+            },
+          )
+        ],
+      ),
+      body: _selectedIndex == 0 ? _buildScannerUI() : _buildWalletUI(),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        onTap: (index) {
+          // حماية المحفظة: لا تفتح إلا للمسجلين
+          if (index == 1 && FirebaseAuth.instance.currentUser == null) {
+            _showLoginRequiredDialog();
+          } else {
+            setState(() => _selectedIndex = index);
+          }
+        },
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.qr_code_scanner), label: "الماسح"),
+          BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet), label: "المحفظة"),
         ],
       ),
     );
+  }
+
+  // واجهة الماسح (متاحة للضيف)
+  Widget _buildScannerUI() {
+    return Column(
+      children: [
+        if (_controller.value.isInitialized)
+          Container(
+            height: 300,
+            margin: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.blue, width: 3),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(17),
+              child: CameraPreview(_controller),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.all(20),
+          child: ElevatedButton.icon(
+            onPressed: _scanImage,
+            icon: const Icon(Icons.camera),
+            label: Text(_isProcessing ? "جاري القراءة..." : "إمسح الكرت الحين"),
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 60),
+              backgroundColor: Colors.blueAccent,
+            ),
+          ),
+        ),
+        const Text("💡 يمكنك مسح الكروت وحفظها على الجهاز كضيف", style: TextStyle(color: Colors.grey)),
+      ],
+    );
+  }
+
+  // واجهة المحفظة (تحتاج تسجيل دخول)
+  Widget _buildWalletUI() {
+    return _savedCards.isEmpty 
+      ? const Center(child: Text("المحفظة خالية"))
+      : ListView.builder(
+          itemCount: _savedCards.length,
+          itemBuilder: (context, index) {
+            return Card(
+              margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+              child: ListTile(
+                title: Text("يوزر: ${_savedCards[index]['user']}"),
+                subtitle: Text("باسورد: ${_savedCards[index]['pass']}"),
+                trailing: IconButton(
+                  icon: const Icon(Icons.cloud_upload, color: Colors.orange),
+                  onPressed: () => _sendViaCloud(index),
+                ),
+              ),
+            );
+          },
+        );
   }
 
   @override
