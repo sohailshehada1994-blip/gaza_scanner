@@ -33,6 +33,7 @@ android {
         
         // تفعيل MultiDex للتعامل مع عدد المكتبات الكبير في Firebase
         multiDexEnabled = true
+        manifestPlaceholders["appName"] = "Supermarket Admin"
     }
 
     signingConfigs {
