@@ -68,4 +68,8 @@ dependencies {
     // استيراد منصة Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
     implementation("com.google.firebase:firebase-analytics")
+// سطر إجباري لتحديث الخدمات
+    tasks.matching { it.name.contains("googleServices") }.configureEach {
+    outputs.upToDateWhen { false }
+}
 }
