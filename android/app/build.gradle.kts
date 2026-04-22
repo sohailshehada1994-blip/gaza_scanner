@@ -9,7 +9,7 @@ plugins {
 
 android {
     // يجب أن يتطابق مع المعرف في Firebase وملف الـ JSON
-    namespace = "com.sohail.super_admin"
+    namespace = "com.sohail.supermarket.admin"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "30.0.14904198"
 
@@ -24,7 +24,7 @@ android {
 
     defaultConfig {
         // هذا هو المعرف الفريد لتطبيقك
-        applicationId = "com.sohail.super_admin"
+        applicationId = "com.sohail.supermarket.admin"
         
         minSdk = 21
         targetSdk = 34
