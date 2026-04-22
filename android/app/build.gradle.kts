@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "com.sohail.gaza_wifi_scanner"
+    namespace = "com.sohail.super_admin"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "30.0.14904198"
 
@@ -22,7 +22,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.sohail.gaza_wifi_scanner"
+        applicationId = "com.sohail.super_admin"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 21
