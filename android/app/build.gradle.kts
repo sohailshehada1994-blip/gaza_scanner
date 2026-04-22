@@ -72,4 +72,3 @@ dependencies {
     tasks.matching { it.name.contains("googleServices") }.configureEach {
     outputs.upToDateWhen { false }
 }
-}
