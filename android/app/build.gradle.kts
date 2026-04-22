@@ -1,12 +1,14 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // لا بد من وجود هذا السطر لربط فلاتر
     id("dev.flutter.flutter-gradle-plugin")
+    // هذا السطر هو المسؤول عن تفعيل خدمات جوجل (Firebase)
     id("com.google.gms.google-services")
 }
 
 android {
+    // يجب أن يتطابق مع المعرف في Firebase وملف الـ JSON
     namespace = "com.sohail.super_admin"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "30.0.14904198"
@@ -21,14 +23,15 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // هذا هو المعرف الفريد لتطبيقك
         applicationId = "com.sohail.super_admin"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        
         minSdk = 21
         targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        
+        // تفعيل MultiDex للتعامل مع عدد المكتبات الكبير في Firebase
         multiDexEnabled = true
     }
 
@@ -46,13 +49,22 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         getByName("release") {
+            // حالياً نستخدم إعدادات الديباج للتجربة
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
+
 flutter {
     source = "../.."
 }
+
 dependencies {
+    // دعم تعدد ملفات الـ Dex (ضروري لـ Firebase)
     implementation("androidx.multidex:multidex:2.0.1")
+    // استيراد منصة Firebase
+    implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
+    implementation("com.google.firebase:firebase-analytics")
 }
